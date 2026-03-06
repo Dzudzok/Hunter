@@ -51,6 +51,9 @@
             <button onclick="switchTab('dzienne')" id="tab-dzienne" class="tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all">
                 <i class="fas fa-calendar-day mr-1.5" aria-hidden="true"></i>Dzienne paczki
             </button>
+            <button onclick="switchTab('ratio')" id="tab-ratio" class="tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                <i class="fas fa-percentage mr-1.5" aria-hidden="true"></i>Bledy/100 paczek
+            </button>
         </div>
     </div>
 
@@ -250,6 +253,67 @@
                                 </tr>
                             </thead>
                             <tbody id="daily-table" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Bledy na 100 paczek -->
+        <div id="section-ratio" class="hidden fade-in">
+            <div class="glass rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Wybierz dzien</label>
+                        <select id="ratio-sheet-select" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[200px]">
+                            <option value="">-- Wybierz dzien --</option>
+                        </select>
+                    </div>
+                    <button onclick="loadRatioData()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        <i class="fas fa-calculator mr-1" aria-hidden="true"></i>Oblicz
+                    </button>
+                </div>
+            </div>
+
+            <div id="ratio-loading" class="hidden text-center py-10">
+                <div class="loader mx-auto mb-3"></div>
+                <p class="text-sm text-gray-500">Obliczanie wskaznika...</p>
+            </div>
+
+            <div id="ratio-content" class="hidden fade-in">
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Paczki ogolnie</div>
+                        <div id="ratio-total-paczki" class="text-2xl font-bold text-gray-900 mt-1">-</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Pomylki w dniu</div>
+                        <div id="ratio-total-bledy" class="text-2xl font-bold text-red-600 mt-1">-</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Bledy / 100 paczek</div>
+                        <div id="ratio-global" class="text-2xl font-bold text-orange-600 mt-1">-</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Bez bledow</div>
+                        <div id="ratio-clean" class="text-2xl font-bold text-green-600 mt-1">-</div>
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">#</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Pracownik</th>
+                                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Paczki</th>
+                                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Pomylki</th>
+                                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Bledy/100</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Wskaznik</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ratio-table" class="divide-y divide-gray-100"></tbody>
                         </table>
                     </div>
                 </div>
@@ -763,10 +827,136 @@
         }
     }
 
+    // ============ RATIO: BLEDY NA 100 PACZEK ============
+    function populateRatioSelect() {
+        const select = document.getElementById('ratio-sheet-select');
+        const dateSheets = sheetNames.filter(name => /^\d{2}\.\d{2}\.\d{4}$/.test(name));
+        dateSheets.sort((a, b) => parseDatePL(b) - parseDatePL(a));
+        select.innerHTML = '<option value="">-- Wybierz dzien --</option>';
+        dateSheets.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    }
+
+    async function loadRatioData() {
+        const sheetName = document.getElementById('ratio-sheet-select').value;
+        if (!sheetName) return;
+
+        document.getElementById('ratio-loading').classList.remove('hidden');
+        document.getElementById('ratio-content').classList.add('hidden');
+
+        try {
+            // Load daily packages
+            const data = await fetchSheet(sheetName);
+            const rows = data.table.rows;
+            const packageMap = {};
+
+            for (const row of rows) {
+                if (!row.c || !row.c[0]) continue;
+                const name = row.c[0]?.v || '';
+                const count = row.c[1]?.v || 0;
+                if (name && name !== 'Imię' && typeof count === 'number') {
+                    packageMap[name.trim().toUpperCase()] = Math.round(count);
+                }
+            }
+
+            // Get mistakes for that day
+            const dayDate = parseDatePL(sheetName);
+            const dayStr = formatDate(dayDate);
+            const dayMistakes = allMistakes.filter(m => formatDate(m.date) === dayStr);
+
+            // Count mistakes per person
+            const mistakeMap = {};
+            dayMistakes.forEach(m => {
+                const key = m.name.toUpperCase();
+                mistakeMap[key] = (mistakeMap[key] || 0) + 1;
+            });
+
+            // Build combined data - all workers who had packages
+            const allWorkers = new Set([...Object.keys(packageMap), ...Object.keys(mistakeMap)]);
+            const combined = [];
+            allWorkers.forEach(name => {
+                const paczki = packageMap[name] || 0;
+                const bledy = mistakeMap[name] || 0;
+                const ratio = paczki > 0 ? (bledy / paczki) * 100 : (bledy > 0 ? 999 : 0);
+                combined.push({ name, paczki, bledy, ratio });
+            });
+
+            // Sort by ratio descending (worst first)
+            combined.sort((a, b) => b.ratio - a.ratio);
+
+            // Stats
+            const totalPaczki = Object.values(packageMap).reduce((s, v) => s + v, 0);
+            const totalBledy = dayMistakes.length;
+            const globalRatio = totalPaczki > 0 ? ((totalBledy / totalPaczki) * 100).toFixed(2) : '-';
+            const cleanWorkers = combined.filter(c => c.bledy === 0 && c.paczki > 0).length;
+
+            document.getElementById('ratio-total-paczki').textContent = totalPaczki.toLocaleString('pl-PL');
+            document.getElementById('ratio-total-bledy').textContent = totalBledy;
+            document.getElementById('ratio-global').textContent = globalRatio;
+            document.getElementById('ratio-clean').textContent = `${cleanWorkers} / ${combined.filter(c => c.paczki > 0).length}`;
+
+            // Render table
+            const maxRatio = Math.max(...combined.map(c => c.ratio), 1);
+            const tbody = document.getElementById('ratio-table');
+            tbody.innerHTML = combined.map((c, i) => {
+                let ratioText, ratioColor, bgColor;
+                if (c.paczki === 0 && c.bledy > 0) {
+                    ratioText = 'brak paczek';
+                    ratioColor = 'text-red-600';
+                    bgColor = 'bg-red-50';
+                } else if (c.ratio === 0) {
+                    ratioText = '0.00';
+                    ratioColor = 'text-green-600';
+                    bgColor = '';
+                } else if (c.ratio <= 1) {
+                    ratioText = c.ratio.toFixed(2);
+                    ratioColor = 'text-yellow-600';
+                    bgColor = '';
+                } else {
+                    ratioText = c.ratio.toFixed(2);
+                    ratioColor = 'text-red-600';
+                    bgColor = 'bg-red-50';
+                }
+                const barWidth = c.ratio > 0 ? Math.min(Math.round((c.ratio / maxRatio) * 100), 100) : 0;
+                const barColor = c.ratio > 1 ? 'bg-red-500' : c.ratio > 0 ? 'bg-yellow-500' : 'bg-green-500';
+
+                // Find original case name from packageMap or mistakeMap
+                const displayName = Object.keys(packageMap).find(k => k === c.name) ||
+                                    Object.keys(mistakeMap).find(k => k === c.name) || c.name;
+
+                return `<tr class="hover:bg-blue-50 transition-colors ${bgColor}">
+                    <td class="px-4 py-2.5 text-gray-400 text-xs">${i + 1}</td>
+                    <td class="px-4 py-2.5 font-medium text-gray-900">${escHtml(displayName)}</td>
+                    <td class="px-4 py-2.5 text-right text-gray-700">${c.paczki > 0 ? c.paczki : '-'}</td>
+                    <td class="px-4 py-2.5 text-right font-semibold ${c.bledy > 0 ? 'text-red-600' : 'text-gray-400'}">${c.bledy}</td>
+                    <td class="px-4 py-2.5 text-right font-bold ${ratioColor}">${ratioText}</td>
+                    <td class="px-4 py-2.5">
+                        <div class="w-24 bg-gray-100 rounded-full h-2">
+                            <div class="${barColor} h-2 rounded-full" style="width:${barWidth}%"></div>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('ratio-loading').classList.add('hidden');
+            document.getElementById('ratio-content').classList.remove('hidden');
+        } catch(e) {
+            console.error(e);
+            document.getElementById('ratio-loading').classList.add('hidden');
+            alert('Blad obliczania wskaznika: ' + e.message);
+        }
+    }
+
     // ============ TABS ============
+    const ALL_TABS = ['pomylki', 'ranking', 'dzienne', 'ratio'];
+
     function switchTab(tab) {
         currentTab = tab;
-        ['pomylki', 'ranking', 'dzienne'].forEach(t => {
+        ALL_TABS.forEach(t => {
             document.getElementById('tab-' + t).className = t === tab ? 'tab-active px-4 py-2 rounded-lg text-sm font-medium transition-all' : 'tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all';
             document.getElementById('section-' + t).classList.toggle('hidden', t !== tab);
         });
@@ -774,10 +964,13 @@
         if (tab === 'ranking') {
             renderRanking(allMistakes);
         }
+        if (tab === 'ratio') {
+            populateRatioSelect();
+        }
     }
 
     function hideAllSections() {
-        ['pomylki', 'ranking', 'dzienne'].forEach(t => {
+        ALL_TABS.forEach(t => {
             document.getElementById('section-' + t).classList.add('hidden');
         });
     }
