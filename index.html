@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hunter - Kontrola Pakowania</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background: #f0f2f5; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .glass { background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); }
+        .loader { border: 3px solid #e5e7eb; border-top-color: #3b82f6; border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .tab-active { background: #3b82f6; color: white; }
+        .tab-inactive { background: white; color: #374151; }
+        .tab-inactive:hover { background: #eff6ff; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        table th { position: sticky; top: 0; z-index: 10; }
+        .sort-icon { opacity: 0.3; transition: opacity 0.2s; }
+        th:hover .sort-icon { opacity: 0.7; }
+        .sort-active .sort-icon { opacity: 1; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
+                    <i class="fas fa-box-open text-white text-lg" aria-hidden="true"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">Hunter - Kontrola Pakowania</h1>
+                    <p class="text-xs text-gray-500">Monitoring pomylek i wydajnosci</p>
+                </div>
+            </div>
+            <div id="lastUpdate" class="text-xs text-gray-400"></div>
+        </div>
+    </header>
+
+    <!-- Tabs -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 mt-6">
+        <div class="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+            <button onclick="switchTab('pomylki')" id="tab-pomylki" class="tab-active px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                <i class="fas fa-exclamation-triangle mr-1.5" aria-hidden="true"></i>Pomylki
+            </button>
+            <button onclick="switchTab('ranking')" id="tab-ranking" class="tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                <i class="fas fa-trophy mr-1.5" aria-hidden="true"></i>Ranking
+            </button>
+            <button onclick="switchTab('dzienne')" id="tab-dzienne" class="tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                <i class="fas fa-calendar-day mr-1.5" aria-hidden="true"></i>Dzienne paczki
+            </button>
+        </div>
+    </div>
+
+    <!-- Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+        <!-- Loading -->
+        <div id="loading" class="flex flex-col items-center justify-center py-20">
+            <div class="loader mb-4"></div>
+            <p class="text-gray-500 text-sm">Ladowanie danych z arkusza...</p>
+        </div>
+
+        <!-- Error -->
+        <div id="error" class="hidden bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <i class="fas fa-exclamation-circle text-red-400 text-3xl mb-3" aria-hidden="true"></i>
+            <p class="text-red-700 font-medium">Blad ladowania danych</p>
+            <p id="errorMsg" class="text-red-500 text-sm mt-1"></p>
+            <button onclick="loadAllData()" class="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">Sprobuj ponownie</button>
+        </div>
+
+        <!-- Tab: Pomylki -->
+        <div id="section-pomylki" class="hidden fade-in">
+            <!-- Stats cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Laczne pomylki</div>
+                    <div id="stat-total" class="text-2xl font-bold text-gray-900 mt-1">-</div>
+                </div>
+                <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Dzisiaj</div>
+                    <div id="stat-today" class="text-2xl font-bold text-blue-600 mt-1">-</div>
+                </div>
+                <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Pracownikow</div>
+                    <div id="stat-workers" class="text-2xl font-bold text-gray-900 mt-1">-</div>
+                </div>
+                <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Najczestszy typ</div>
+                    <div id="stat-toptype" class="text-lg font-bold text-orange-600 mt-1">-</div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="glass rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data od</label>
+                        <input type="date" id="filter-date-from" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data do</label>
+                        <input type="date" id="filter-date-to" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Pracownik</label>
+                        <select id="filter-worker" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[150px]">
+                            <option value="">Wszyscy</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Typ pomylki</label>
+                        <select id="filter-type" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[150px]">
+                            <option value="">Wszystkie</option>
+                        </select>
+                    </div>
+                    <button onclick="applyFilters()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        <i class="fas fa-filter mr-1" aria-hidden="true"></i>Filtruj
+                    </button>
+                    <button onclick="clearFilters()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors">
+                        <i class="fas fa-times mr-1" aria-hidden="true"></i>Wyczysc
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtered count -->
+            <div class="flex items-center justify-between mb-2">
+                <p id="filtered-count" class="text-sm text-gray-500"></p>
+                <button onclick="exportCSV()" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
+                    <i class="fas fa-download mr-1" aria-hidden="true"></i>Eksport CSV
+                </button>
+            </div>
+
+            <!-- Table -->
+            <div class="glass rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div class="overflow-x-auto max-h-[600px] overflow-y-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none" onclick="sortTable('lp')"># <i class="fas fa-sort sort-icon ml-1" aria-hidden="true"></i></th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none" onclick="sortTable('name')">Pracownik <i class="fas fa-sort sort-icon ml-1" aria-hidden="true"></i></th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none" onclick="sortTable('type')">Typ pomylki <i class="fas fa-sort sort-icon ml-1" aria-hidden="true"></i></th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer select-none" onclick="sortTable('date')">Data <i class="fas fa-sort sort-icon ml-1" aria-hidden="true"></i></th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Godzina</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pomylki-table" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Ranking -->
+        <div id="section-ranking" class="hidden fade-in">
+            <div class="glass rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data od</label>
+                        <input type="date" id="rank-date-from" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data do</label>
+                        <input type="date" id="rank-date-to" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                    </div>
+                    <button onclick="applyRankingFilter()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        <i class="fas fa-filter mr-1" aria-hidden="true"></i>Filtruj
+                    </button>
+                </div>
+            </div>
+
+            <!-- Ranking by errors -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="glass rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                        <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-list-ol mr-1.5 text-red-500" aria-hidden="true"></i>Ranking pomylek (od najwiecej)</h3>
+                    </div>
+                    <div class="overflow-y-auto max-h-[500px]">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">#</th>
+                                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Pracownik</th>
+                                    <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">Pomylki</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ranking-table" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+                        <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-chart-pie mr-1.5 text-blue-500" aria-hidden="true"></i>Typy pomylek</h3>
+                    </div>
+                    <div class="p-4">
+                        <div id="type-chart" class="space-y-3"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Dzienne -->
+        <div id="section-dzienne" class="hidden fade-in">
+            <div class="glass rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Wybierz arkusz dzienny</label>
+                        <select id="daily-sheet-select" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[200px]">
+                            <option value="">-- Wybierz dzien --</option>
+                        </select>
+                    </div>
+                    <button onclick="loadDailySheet()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+                        <i class="fas fa-download mr-1" aria-hidden="true"></i>Zaladuj
+                    </button>
+                </div>
+            </div>
+
+            <div id="daily-loading" class="hidden text-center py-10">
+                <div class="loader mx-auto mb-3"></div>
+                <p class="text-sm text-gray-500">Ladowanie danych dziennych...</p>
+            </div>
+
+            <div id="daily-content" class="hidden fade-in">
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Lacznie paczek</div>
+                        <div id="daily-total" class="text-2xl font-bold text-gray-900 mt-1">-</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Pracownikow</div>
+                        <div id="daily-workers" class="text-2xl font-bold text-blue-600 mt-1">-</div>
+                    </div>
+                    <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Srednia na osobe</div>
+                        <div id="daily-avg" class="text-2xl font-bold text-green-600 mt-1">-</div>
+                    </div>
+                </div>
+
+                <div class="glass rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">#</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Pracownik</th>
+                                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Liczba paczek</th>
+                                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Udzial</th>
+                                </tr>
+                            </thead>
+                            <tbody id="daily-table" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+    // ============ CONFIG ============
+    const SPREADSHEET_ID = '1Ps417ET4Ci2Y3GkfYNeTQNMQNdj_QeAYe8PsDyefXB0';
+
+    // ============ STATE ============
+    let allMistakes = [];
+    let filteredMistakes = [];
+    let sheetNames = [];
+    let sortCol = 'date';
+    let sortAsc = false;
+    let currentTab = 'pomylki';
+
+    // ============ GOOGLE SHEETS FETCH (JSONP - no CORS issues) ============
+    let _jsonpCounter = 0;
+
+    function fetchSheetJsonp(sheetName) {
+        return new Promise((resolve, reject) => {
+            const cbName = '_gsheetCb' + (++_jsonpCounter);
+            const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json;responseHandler:${cbName}&sheet=${encodeURIComponent(sheetName)}`;
+
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error('Timeout ladowania arkusza: ' + sheetName));
+            }, 15000);
+
+            function cleanup() {
+                clearTimeout(timeout);
+                delete window[cbName];
+                if (script.parentNode) script.parentNode.removeChild(script);
+            }
+
+            window[cbName] = function(data) {
+                cleanup();
+                resolve(data);
+            };
+
+            const script = document.createElement('script');
+            script.src = url;
+            script.onerror = function() {
+                cleanup();
+                reject(new Error('Nie mozna zaladowac arkusza: ' + sheetName));
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    async function fetchSheet(sheetName) {
+        return await fetchSheetJsonp(sheetName);
+    }
+
+    // Fetch sheet names by loading the spreadsheet HTML page via JSONP workaround
+    // Since we can't fetch HTML cross-origin, we try known GIDs
+    async function fetchSheetNames() {
+        // We'll try to detect daily sheets by probing recent dates
+        return null; // Will fallback to guessDailySheets
+    }
+
+    // ============ PARSE MISTAKES ============
+    function parseDatePL(dateStr) {
+        // Format: "DD.MM.YYYY HH:MM:SS" or "DD.MM.YYYY"
+        if (!dateStr) return null;
+        const str = String(dateStr).trim();
+        const parts = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+        if (!parts) return null;
+        const day = parseInt(parts[1], 10);
+        const month = parseInt(parts[2], 10) - 1;
+        const year = parseInt(parts[3], 10);
+
+        const timeParts = str.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+        if (timeParts) {
+            return new Date(year, month, day, parseInt(timeParts[1]), parseInt(timeParts[2]), parseInt(timeParts[3]));
+        }
+        return new Date(year, month, day);
+    }
+
+    function formatDate(date) {
+        if (!date) return '-';
+        const d = String(date.getDate()).padStart(2, '0');
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        return `${d}.${m}.${date.getFullYear()}`;
+    }
+
+    function formatTime(date) {
+        if (!date) return '-';
+        const h = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        const s = String(date.getSeconds()).padStart(2, '0');
+        return `${h}:${min}:${s}`;
+    }
+
+    function toISODate(date) {
+        if (!date) return '';
+        return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    }
+
+    // Parse the "Pomylki" sheet
+    function parseMistakes(data) {
+        const rows = data.table.rows;
+        const cols = data.table.cols;
+        const results = [];
+
+        for (const row of rows) {
+            if (!row.c || !row.c[0]) continue;
+
+            const name = row.c[0]?.v || '';
+            const type = row.c[1]?.v || '';
+            // Date could be in column 2 as formatted value or as Date object
+            let dateVal = null;
+            if (row.c[2]) {
+                if (row.c[2].f) {
+                    dateVal = parseDatePL(row.c[2].f);
+                } else if (row.c[2].v) {
+                    // Could be "Date(year,month,day,h,m,s)" format from gviz
+                    const dMatch = String(row.c[2].v).match(/Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)/);
+                    if (dMatch) {
+                        dateVal = new Date(
+                            parseInt(dMatch[1]),
+                            parseInt(dMatch[2]),
+                            parseInt(dMatch[3]),
+                            parseInt(dMatch[4] || 0),
+                            parseInt(dMatch[5] || 0),
+                            parseInt(dMatch[6] || 0)
+                        );
+                    } else {
+                        dateVal = parseDatePL(String(row.c[2].v));
+                    }
+                }
+            }
+
+            if (name && name !== 'Imię') {
+                results.push({ name: name.trim(), type: type.trim(), date: dateVal });
+            }
+        }
+        return results;
+    }
+
+    // ============ LOAD DATA ============
+    async function loadAllData() {
+        document.getElementById('loading').classList.remove('hidden');
+        document.getElementById('error').classList.add('hidden');
+        hideAllSections();
+
+        try {
+            // Load mistakes
+            const mistakesData = await fetchSheet('Pomyłki');
+            allMistakes = parseMistakes(mistakesData);
+
+            // Try to get sheet names for daily sheets
+            await loadSheetNames();
+
+            // Populate filters
+            populateFilters();
+
+            // Show data
+            document.getElementById('loading').classList.add('hidden');
+            applyFilters();
+            switchTab(currentTab);
+
+            document.getElementById('lastUpdate').textContent = 'Zaktualizowano: ' + new Date().toLocaleString('pl-PL');
+        } catch (e) {
+            console.error(e);
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+            document.getElementById('errorMsg').textContent = e.message;
+        }
+    }
+
+    async function loadSheetNames() {
+        try {
+            const names = await fetchSheetNames();
+            if (names) {
+                sheetNames = names;
+            } else {
+                // Fallback: try to guess date-based sheet names for recent days
+                sheetNames = ['Lista_Pracownikow', 'Pomyłki'];
+                await guessDailySheets();
+            }
+            populateDailySelect();
+        } catch(e) {
+            console.warn('Nie udalo sie pobrac listy arkuszy:', e);
+        }
+    }
+
+    async function guessDailySheets() {
+        // Try recent 90 days using JSONP
+        const found = [];
+        const today = new Date();
+        const datesToCheck = [];
+
+        for (let i = 0; i < 90; i++) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            datesToCheck.push(`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`);
+        }
+
+        // Check in batches of 5 to avoid overwhelming Google
+        const batchSize = 5;
+        for (let i = 0; i < datesToCheck.length; i += batchSize) {
+            const batch = datesToCheck.slice(i, i + batchSize);
+            const results = await Promise.allSettled(
+                batch.map(name =>
+                    fetchSheetJsonp(name)
+                        .then(data => {
+                            if (data && data.status === 'ok') found.push(name);
+                        })
+                        .catch(() => {})
+                )
+            );
+        }
+        sheetNames = [...sheetNames, ...found];
+    }
+
+    function populateDailySelect() {
+        const select = document.getElementById('daily-sheet-select');
+        // Filter sheet names that look like dates
+        const dateSheets = sheetNames.filter(name => /^\d{2}\.\d{2}\.\d{4}$/.test(name));
+        // Sort by date descending
+        dateSheets.sort((a, b) => {
+            const da = parseDatePL(a);
+            const db = parseDatePL(b);
+            return db - da;
+        });
+
+        select.innerHTML = '<option value="">-- Wybierz dzien --</option>';
+        dateSheets.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    }
+
+    // ============ FILTERS ============
+    function populateFilters() {
+        const workerSet = new Set();
+        const typeSet = new Set();
+        allMistakes.forEach(m => {
+            if (m.name) workerSet.add(m.name);
+            if (m.type) typeSet.add(m.type);
+        });
+
+        const workerSelect = document.getElementById('filter-worker');
+        workerSelect.innerHTML = '<option value="">Wszyscy</option>';
+        [...workerSet].sort().forEach(w => {
+            const opt = document.createElement('option');
+            opt.value = w;
+            opt.textContent = w;
+            workerSelect.appendChild(opt);
+        });
+
+        const typeSelect = document.getElementById('filter-type');
+        typeSelect.innerHTML = '<option value="">Wszystkie</option>';
+        [...typeSet].sort().forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            typeSelect.appendChild(opt);
+        });
+
+        // Set default date range (last 30 days)
+        const today = new Date();
+        const monthAgo = new Date();
+        monthAgo.setDate(monthAgo.getDate() - 30);
+        document.getElementById('filter-date-to').value = toISODate(today);
+        document.getElementById('filter-date-from').value = toISODate(monthAgo);
+    }
+
+    function applyFilters() {
+        const dateFrom = document.getElementById('filter-date-from').value ? new Date(document.getElementById('filter-date-from').value + 'T00:00:00') : null;
+        const dateTo = document.getElementById('filter-date-to').value ? new Date(document.getElementById('filter-date-to').value + 'T23:59:59') : null;
+        const worker = document.getElementById('filter-worker').value;
+        const type = document.getElementById('filter-type').value;
+
+        filteredMistakes = allMistakes.filter(m => {
+            if (dateFrom && m.date && m.date < dateFrom) return false;
+            if (dateTo && m.date && m.date > dateTo) return false;
+            if (worker && m.name !== worker) return false;
+            if (type && m.type !== type) return false;
+            return true;
+        });
+
+        sortMistakes();
+        renderMistakesTable();
+        updateStats();
+    }
+
+    function clearFilters() {
+        document.getElementById('filter-date-from').value = '';
+        document.getElementById('filter-date-to').value = '';
+        document.getElementById('filter-worker').value = '';
+        document.getElementById('filter-type').value = '';
+        filteredMistakes = [...allMistakes];
+        sortMistakes();
+        renderMistakesTable();
+        updateStats();
+    }
+
+    // ============ SORTING ============
+    function sortTable(col) {
+        if (sortCol === col) {
+            sortAsc = !sortAsc;
+        } else {
+            sortCol = col;
+            sortAsc = true;
+        }
+        sortMistakes();
+        renderMistakesTable();
+    }
+
+    function sortMistakes() {
+        filteredMistakes.sort((a, b) => {
+            let va, vb;
+            switch(sortCol) {
+                case 'name': va = a.name; vb = b.name; break;
+                case 'type': va = a.type; vb = b.type; break;
+                case 'date': va = a.date; vb = b.date; break;
+                default: return 0;
+            }
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            if (va < vb) return sortAsc ? -1 : 1;
+            if (va > vb) return sortAsc ? 1 : -1;
+            return 0;
+        });
+    }
+
+    // ============ RENDER ============
+    function renderMistakesTable() {
+        const tbody = document.getElementById('pomylki-table');
+        if (filteredMistakes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">Brak danych dla wybranych filtrow</td></tr>';
+            document.getElementById('filtered-count').textContent = '0 rekordow';
+            return;
+        }
+
+        const typeColors = {
+            'Brak sztuki': 'bg-red-50 text-red-700',
+            'Zły numer': 'bg-orange-50 text-orange-700',
+            'Za dużo w Paczce': 'bg-yellow-50 text-yellow-700',
+        };
+
+        tbody.innerHTML = filteredMistakes.map((m, i) => {
+            const colorClass = typeColors[m.type] || 'bg-gray-50 text-gray-700';
+            return `<tr class="hover:bg-blue-50 transition-colors">
+                <td class="px-4 py-2.5 text-gray-400 text-xs">${i + 1}</td>
+                <td class="px-4 py-2.5 font-medium text-gray-900">${escHtml(m.name)}</td>
+                <td class="px-4 py-2.5"><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colorClass}">${escHtml(m.type)}</span></td>
+                <td class="px-4 py-2.5 text-gray-700">${formatDate(m.date)}</td>
+                <td class="px-4 py-2.5 text-gray-500">${formatTime(m.date)}</td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('filtered-count').textContent = `${filteredMistakes.length} rekordow`;
+    }
+
+    function updateStats() {
+        document.getElementById('stat-total').textContent = filteredMistakes.length;
+
+        const today = new Date();
+        const todayStr = formatDate(today);
+        const todayCount = filteredMistakes.filter(m => formatDate(m.date) === todayStr).length;
+        document.getElementById('stat-today').textContent = todayCount;
+
+        const workers = new Set(filteredMistakes.map(m => m.name));
+        document.getElementById('stat-workers').textContent = workers.size;
+
+        // Most common type
+        const typeCounts = {};
+        filteredMistakes.forEach(m => {
+            typeCounts[m.type] = (typeCounts[m.type] || 0) + 1;
+        });
+        const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
+        document.getElementById('stat-toptype').textContent = topType ? `${topType[0]} (${topType[1]})` : '-';
+    }
+
+    // ============ RANKING ============
+    function renderRanking(mistakes) {
+        // Count by worker
+        const counts = {};
+        mistakes.forEach(m => {
+            counts[m.name] = (counts[m.name] || 0) + 1;
+        });
+
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const maxCount = sorted.length > 0 ? sorted[0][1] : 1;
+
+        const tbody = document.getElementById('ranking-table');
+        tbody.innerHTML = sorted.map(([name, count], i) => {
+            let medal = '';
+            if (i === 0) medal = '<i class="fas fa-medal text-yellow-500 mr-1" aria-hidden="true"></i>';
+            else if (i === 1) medal = '<i class="fas fa-medal text-gray-400 mr-1" aria-hidden="true"></i>';
+            else if (i === 2) medal = '<i class="fas fa-medal text-orange-400 mr-1" aria-hidden="true"></i>';
+
+            const barWidth = Math.round((count / maxCount) * 100);
+
+            return `<tr class="hover:bg-blue-50 transition-colors">
+                <td class="px-4 py-2.5 text-gray-400 text-xs">${medal}${i + 1}</td>
+                <td class="px-4 py-2.5 font-medium text-gray-900">${escHtml(name)}</td>
+                <td class="px-4 py-2.5 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <div class="w-24 bg-gray-100 rounded-full h-2">
+                            <div class="bg-red-500 h-2 rounded-full" style="width:${barWidth}%"></div>
+                        </div>
+                        <span class="font-semibold text-gray-900 min-w-[2rem] text-right">${count}</span>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+
+        // Type chart
+        const typeCounts = {};
+        mistakes.forEach(m => {
+            typeCounts[m.type] = (typeCounts[m.type] || 0) + 1;
+        });
+        const typeTotal = mistakes.length || 1;
+        const typeColors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-blue-500', 'bg-purple-500', 'bg-green-500'];
+        const typeSorted = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]);
+
+        document.getElementById('type-chart').innerHTML = typeSorted.map(([type, count], i) => {
+            const pct = Math.round((count / typeTotal) * 100);
+            const color = typeColors[i % typeColors.length];
+            return `<div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-medium text-gray-700">${escHtml(type)}</span>
+                    <span class="text-gray-500">${count} (${pct}%)</span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-3">
+                    <div class="${color} h-3 rounded-full transition-all duration-500" style="width:${pct}%"></div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function applyRankingFilter() {
+        const dateFrom = document.getElementById('rank-date-from').value ? new Date(document.getElementById('rank-date-from').value + 'T00:00:00') : null;
+        const dateTo = document.getElementById('rank-date-to').value ? new Date(document.getElementById('rank-date-to').value + 'T23:59:59') : null;
+
+        const filtered = allMistakes.filter(m => {
+            if (dateFrom && m.date && m.date < dateFrom) return false;
+            if (dateTo && m.date && m.date > dateTo) return false;
+            return true;
+        });
+
+        renderRanking(filtered);
+    }
+
+    // ============ DAILY SHEETS ============
+    async function loadDailySheet() {
+        const sheetName = document.getElementById('daily-sheet-select').value;
+        if (!sheetName) return;
+
+        document.getElementById('daily-loading').classList.remove('hidden');
+        document.getElementById('daily-content').classList.add('hidden');
+
+        try {
+            const data = await fetchSheet(sheetName);
+            const rows = data.table.rows;
+            const entries = [];
+
+            for (const row of rows) {
+                if (!row.c || !row.c[0]) continue;
+                const name = row.c[0]?.v || '';
+                const count = row.c[1]?.v || 0;
+                if (name && name !== 'Imię' && typeof count === 'number') {
+                    entries.push({ name: name.trim(), count: Math.round(count) });
+                }
+            }
+
+            // Sort by count desc
+            entries.sort((a, b) => b.count - a.count);
+            const total = entries.reduce((s, e) => s + e.count, 0);
+            const avg = entries.length > 0 ? Math.round(total / entries.length) : 0;
+
+            document.getElementById('daily-total').textContent = total.toLocaleString('pl-PL');
+            document.getElementById('daily-workers').textContent = entries.length;
+            document.getElementById('daily-avg').textContent = avg;
+
+            const tbody = document.getElementById('daily-table');
+            tbody.innerHTML = entries.map((e, i) => {
+                const pct = total > 0 ? ((e.count / total) * 100).toFixed(1) : 0;
+                const barWidth = total > 0 ? Math.round((e.count / entries[0].count) * 100) : 0;
+                return `<tr class="hover:bg-blue-50 transition-colors">
+                    <td class="px-4 py-2.5 text-gray-400 text-xs">${i + 1}</td>
+                    <td class="px-4 py-2.5 font-medium text-gray-900">${escHtml(e.name)}</td>
+                    <td class="px-4 py-2.5 text-right font-semibold text-gray-900">${e.count}</td>
+                    <td class="px-4 py-2.5">
+                        <div class="flex items-center gap-2">
+                            <div class="w-24 bg-gray-100 rounded-full h-2">
+                                <div class="bg-blue-500 h-2 rounded-full" style="width:${barWidth}%"></div>
+                            </div>
+                            <span class="text-xs text-gray-500">${pct}%</span>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('daily-loading').classList.add('hidden');
+            document.getElementById('daily-content').classList.remove('hidden');
+        } catch(e) {
+            console.error(e);
+            document.getElementById('daily-loading').classList.add('hidden');
+            alert('Blad ladowania arkusza dziennego: ' + e.message);
+        }
+    }
+
+    // ============ TABS ============
+    function switchTab(tab) {
+        currentTab = tab;
+        ['pomylki', 'ranking', 'dzienne'].forEach(t => {
+            document.getElementById('tab-' + t).className = t === tab ? 'tab-active px-4 py-2 rounded-lg text-sm font-medium transition-all' : 'tab-inactive px-4 py-2 rounded-lg text-sm font-medium transition-all';
+            document.getElementById('section-' + t).classList.toggle('hidden', t !== tab);
+        });
+
+        if (tab === 'ranking') {
+            renderRanking(allMistakes);
+        }
+    }
+
+    function hideAllSections() {
+        ['pomylki', 'ranking', 'dzienne'].forEach(t => {
+            document.getElementById('section-' + t).classList.add('hidden');
+        });
+    }
+
+    // ============ EXPORT ============
+    function exportCSV() {
+        if (filteredMistakes.length === 0) return;
+        const header = 'Pracownik;Typ pomylki;Data;Godzina\n';
+        const rows = filteredMistakes.map(m =>
+            `${m.name};${m.type};${formatDate(m.date)};${formatTime(m.date)}`
+        ).join('\n');
+        const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pomylki_${new Date().toISOString().slice(0,10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ============ UTILS ============
+    function escHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // ============ INIT ============
+    loadAllData();
+    </script>
+</body>
+</html>
