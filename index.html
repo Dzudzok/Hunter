@@ -264,11 +264,15 @@
             <div class="glass rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
                 <div class="flex flex-wrap gap-3 items-end">
                     <div>
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Wybierz dzien</label>
-                        <select id="ratio-sheet-select" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none min-w-[200px]">
-                            <option value="">-- Wybierz dzien --</option>
-                        </select>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data od</label>
+                        <input type="date" id="ratio-date-from" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
                     </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Data do</label>
+                        <input type="date" id="ratio-date-to" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
+                    </div>
+                    <button onclick="setRatioWeek('this')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200 transition-colors">Ten tydz.</button>
+                    <button onclick="setRatioWeek('last')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-200 transition-colors">Poprz. tydz.</button>
                     <button onclick="loadRatioData()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
                         <i class="fas fa-calculator mr-1" aria-hidden="true"></i>Oblicz
                     </button>
@@ -277,17 +281,19 @@
 
             <div id="ratio-loading" class="hidden text-center py-10">
                 <div class="loader mx-auto mb-3"></div>
-                <p class="text-sm text-gray-500">Obliczanie wskaznika...</p>
+                <p class="text-sm text-gray-500">Ladowanie arkuszy dziennych...</p>
+                <p id="ratio-progress" class="text-xs text-gray-400 mt-1"></p>
             </div>
 
             <div id="ratio-content" class="hidden fade-in">
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                     <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
-                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Paczki ogolnie</div>
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Paczki lacznie</div>
                         <div id="ratio-total-paczki" class="text-2xl font-bold text-gray-900 mt-1">-</div>
+                        <div id="ratio-days-info" class="text-xs text-gray-400 mt-1"></div>
                     </div>
                     <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
-                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Pomylki w dniu</div>
+                        <div class="text-xs text-gray-500 font-medium uppercase tracking-wide">Pomylki lacznie</div>
                         <div id="ratio-total-bledy" class="text-2xl font-bold text-red-600 mt-1">-</div>
                     </div>
                     <div class="glass rounded-xl p-4 border border-gray-200 shadow-sm">
@@ -828,54 +834,96 @@
     }
 
     // ============ RATIO: BLEDY NA 100 PACZEK ============
-    function populateRatioSelect() {
-        const select = document.getElementById('ratio-sheet-select');
-        const dateSheets = sheetNames.filter(name => /^\d{2}\.\d{2}\.\d{4}$/.test(name));
-        dateSheets.sort((a, b) => parseDatePL(b) - parseDatePL(a));
-        select.innerHTML = '<option value="">-- Wybierz dzien --</option>';
-        dateSheets.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            select.appendChild(opt);
-        });
+    function setRatioWeek(which) {
+        const today = new Date();
+        const dayOfWeek = today.getDay() || 7; // Monday=1, Sunday=7
+        let monday, sunday;
+
+        if (which === 'this') {
+            monday = new Date(today);
+            monday.setDate(today.getDate() - dayOfWeek + 1);
+            sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+        } else {
+            monday = new Date(today);
+            monday.setDate(today.getDate() - dayOfWeek - 6);
+            sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+        }
+
+        document.getElementById('ratio-date-from').value = toISODate(monday);
+        document.getElementById('ratio-date-to').value = toISODate(sunday);
+    }
+
+    function initRatioDates() {
+        // Default: current week
+        setRatioWeek('this');
     }
 
     async function loadRatioData() {
-        const sheetName = document.getElementById('ratio-sheet-select').value;
-        if (!sheetName) return;
+        const fromVal = document.getElementById('ratio-date-from').value;
+        const toVal = document.getElementById('ratio-date-to').value;
+        if (!fromVal || !toVal) { alert('Wybierz zakres dat'); return; }
+
+        const dateFrom = new Date(fromVal + 'T00:00:00');
+        const dateTo = new Date(toVal + 'T23:59:59');
 
         document.getElementById('ratio-loading').classList.remove('hidden');
         document.getElementById('ratio-content').classList.add('hidden');
 
         try {
-            // Load daily packages
-            const data = await fetchSheet(sheetName);
-            const rows = data.table.rows;
-            const packageMap = {};
+            // Generate list of days in range
+            const days = [];
+            const d = new Date(dateFrom);
+            while (d <= dateTo) {
+                days.push(`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`);
+                d.setDate(d.getDate() + 1);
+            }
 
-            for (const row of rows) {
-                if (!row.c || !row.c[0]) continue;
-                const name = row.c[0]?.v || '';
-                const count = row.c[1]?.v || 0;
-                if (name && name !== 'Imię' && typeof count === 'number') {
-                    packageMap[name.trim().toUpperCase()] = Math.round(count);
+            // Filter to only sheets that exist
+            const availableDateSheets = sheetNames.filter(name => /^\d{2}\.\d{2}\.\d{4}$/.test(name));
+            const sheetsToLoad = days.filter(day => availableDateSheets.includes(day));
+
+            // Load all daily sheets in the range
+            const packageMap = {}; // name -> total packages
+            const originalNames = {}; // uppercase -> original case
+            let loadedDays = 0;
+
+            for (const sheetDay of sheetsToLoad) {
+                document.getElementById('ratio-progress').textContent = `Ladowanie ${++loadedDays}/${sheetsToLoad.length}: ${sheetDay}`;
+                try {
+                    const data = await fetchSheet(sheetDay);
+                    const rows = data.table.rows;
+                    for (const row of rows) {
+                        if (!row.c || !row.c[0]) continue;
+                        const name = row.c[0]?.v || '';
+                        const count = row.c[1]?.v || 0;
+                        if (name && name !== 'Imię' && typeof count === 'number') {
+                            const key = name.trim().toUpperCase();
+                            packageMap[key] = (packageMap[key] || 0) + Math.round(count);
+                            if (!originalNames[key]) originalNames[key] = name.trim();
+                        }
+                    }
+                } catch(e) {
+                    console.warn('Nie udalo sie zaladowac:', sheetDay, e);
                 }
             }
 
-            // Get mistakes for that day
-            const dayDate = parseDatePL(sheetName);
-            const dayStr = formatDate(dayDate);
-            const dayMistakes = allMistakes.filter(m => formatDate(m.date) === dayStr);
+            // Get mistakes in date range
+            const rangeMistakes = allMistakes.filter(m => {
+                if (!m.date) return false;
+                return m.date >= dateFrom && m.date <= dateTo;
+            });
 
             // Count mistakes per person
             const mistakeMap = {};
-            dayMistakes.forEach(m => {
+            rangeMistakes.forEach(m => {
                 const key = m.name.toUpperCase();
                 mistakeMap[key] = (mistakeMap[key] || 0) + 1;
+                if (!originalNames[key]) originalNames[key] = m.name;
             });
 
-            // Build combined data - all workers who had packages
+            // Build combined data
             const allWorkers = new Set([...Object.keys(packageMap), ...Object.keys(mistakeMap)]);
             const combined = [];
             allWorkers.forEach(name => {
@@ -890,7 +938,7 @@
 
             // Stats
             const totalPaczki = Object.values(packageMap).reduce((s, v) => s + v, 0);
-            const totalBledy = dayMistakes.length;
+            const totalBledy = rangeMistakes.length;
             const globalRatio = totalPaczki > 0 ? ((totalBledy / totalPaczki) * 100).toFixed(2) : '-';
             const cleanWorkers = combined.filter(c => c.bledy === 0 && c.paczki > 0).length;
 
@@ -898,6 +946,7 @@
             document.getElementById('ratio-total-bledy').textContent = totalBledy;
             document.getElementById('ratio-global').textContent = globalRatio;
             document.getElementById('ratio-clean').textContent = `${cleanWorkers} / ${combined.filter(c => c.paczki > 0).length}`;
+            document.getElementById('ratio-days-info').textContent = `${sheetsToLoad.length} z ${days.length} dni zaladowanych`;
 
             // Render table
             const maxRatio = Math.max(...combined.map(c => c.ratio), 1);
@@ -923,15 +972,12 @@
                 }
                 const barWidth = c.ratio > 0 ? Math.min(Math.round((c.ratio / maxRatio) * 100), 100) : 0;
                 const barColor = c.ratio > 1 ? 'bg-red-500' : c.ratio > 0 ? 'bg-yellow-500' : 'bg-green-500';
-
-                // Find original case name from packageMap or mistakeMap
-                const displayName = Object.keys(packageMap).find(k => k === c.name) ||
-                                    Object.keys(mistakeMap).find(k => k === c.name) || c.name;
+                const displayName = originalNames[c.name] || c.name;
 
                 return `<tr class="hover:bg-blue-50 transition-colors ${bgColor}">
                     <td class="px-4 py-2.5 text-gray-400 text-xs">${i + 1}</td>
                     <td class="px-4 py-2.5 font-medium text-gray-900">${escHtml(displayName)}</td>
-                    <td class="px-4 py-2.5 text-right text-gray-700">${c.paczki > 0 ? c.paczki : '-'}</td>
+                    <td class="px-4 py-2.5 text-right text-gray-700">${c.paczki > 0 ? c.paczki.toLocaleString('pl-PL') : '-'}</td>
                     <td class="px-4 py-2.5 text-right font-semibold ${c.bledy > 0 ? 'text-red-600' : 'text-gray-400'}">${c.bledy}</td>
                     <td class="px-4 py-2.5 text-right font-bold ${ratioColor}">${ratioText}</td>
                     <td class="px-4 py-2.5">
@@ -965,7 +1011,7 @@
             renderRanking(allMistakes);
         }
         if (tab === 'ratio') {
-            populateRatioSelect();
+            initRatioDates();
         }
     }
 
